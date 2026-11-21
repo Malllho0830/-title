@@ -2,7 +2,7 @@ const $=id=>document.getElementById(id);
 const fmt=x=>Number(x).toLocaleString('ko-KR',{maximumFractionDigits:3});
 let worker, nextId=0, requests=new Map(), sectors=[], rowChoices=[], cells=[], basket=[], result=null, linkage=[], currentLevel='basic';
 const YEARS=['2024','2023','2022'];
-let currentYear=YEARS[0];
+let currentYear=YEARS[0], demand=null, comparing=false;
 const LEVELS={
  basic:{label:'기본부문',files:y=>['io-'+y+'-basic.xlsx'].concat(y==='2023'?['io-2023.xlsx']:[])},
  small:{label:'소분류',files:y=>['io-'+y+'-small.xlsx']},
@@ -15,12 +15,12 @@ function startWorker(){worker=new Worker('./worker.js');worker.onmessage=({data:
 function options(el,list){el.replaceChildren(...list.map(x=>{const o=document.createElement('option');o.value=x.code;o.textContent=x.code+' '+x.name;return o;}));}
 function invalidate(){result=null;$('results').hidden=true;}
 async function load(buffer,level,year){
- invalidate();basket=[];renderBasket();
- for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount','link-sort','link-search'])$(id).disabled=true;
+ invalidate();basket=[];renderBasket();$('compare-results').hidden=true;$('compare-status').textContent='시뮬레이션에서 시나리오를 추가한 뒤 비교하세요.';
+ for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount','link-sort','link-search','dem-sector','dem-sector-search','compare-run'])$(id).disabled=true;
  if(worker)worker.terminate();for(const p of requests.values())p.reject(Error('데이터 다시 로드'));requests.clear();startWorker();
- try{const info=await call('init',buffer);sectors=info.sectors;linkage=info.linkage||[];currentLevel=level;currentYear=year;options($('sector'),sectors);setLevelTexts();$('link-search').value='';renderLinkage();$('sector-search').value='';$('row-search').value='';$('col-search').value='';$('sheet').replaceChildren(...info.sheets.map(s=>{const o=text('option',s);o.value=s;return o;}));
+ try{const info=await call('init',buffer);sectors=info.sectors;linkage=info.linkage||[];currentLevel=level;currentYear=year;options($('sector'),sectors);setLevelTexts();$('link-search').value='';renderLinkage();demand=info.demand||null;$('dem-sector-search').value='';options($('dem-sector'),sectors);renderDemand();$('sector-search').value='';$('row-search').value='';$('col-search').value='';$('sheet').replaceChildren(...info.sheets.map(s=>{const o=text('option',s);o.value=s;return o;}));
  $('validation').textContent=JSON.stringify(info.residuals,null,2)+'\n최대 절대 잔차: 허용값 1e-8 미만';
- for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount','link-sort','link-search'])$(id).disabled=false;
+ for(const id of ['sheet','row','sector','add','run','row-search','col-search','sector-search','amount','link-sort','link-search','dem-sector','dem-sector-search','compare-run'])$(id).disabled=false;
  await explore();$('status').textContent='준비 완료 · '+year+'년 '+LEVELS[level].label+' · '+sectors.length+'개 부문 · '+info.sheets.length+'개 시트 · 계수 검증 통과';
  }catch(e){$('status').textContent='준비 실패: '+e.message+' — 새로고침 후 재시도하세요.';}
 }
@@ -43,7 +43,7 @@ $('download').onclick=()=>{if(!result)return;const rows=[['산업코드','산업
 function setLevelTexts(){
  const L=LEVELS[currentLevel].label,n=sectors.length;
  $('hdr-sub').textContent=currentYear+' · 생산자가격 · '+L;
- $('hdr-desc').textContent='12개 원자료 시트 탐색, '+n+'개 부문 수요충격 분석, 산업 연쇄효과 분석';
+ $('hdr-desc').textContent='12개 원자료 시트 탐색, '+n+'개 부문 수요충격·연쇄효과 분석, 최종수요 항목별 분해, 연도 간 비교';
  $('download').textContent='전체 '+n+'개 산업 CSV 다운로드';
  $('result-caption').textContent=currentYear+'년 '+L+' 산업별 유발액 — 백만원, 생산유발액 내림차순';
  $('link-caption').textContent=currentYear+'년 '+L+' 산업 연쇄효과 ('+n+'개 부문) — 무단위 지수, 전 산업 평균 = 1';
@@ -56,6 +56,116 @@ function renderLinkage(){
  $('link-summary').textContent=linkage.length?Object.entries(cnt).map(([t,v])=>t+' '+v+'개').join(' · '):'자료를 불러온 후 표시됩니다.';
 }
 $('link-sort').onchange=renderLinkage;$('link-search').oninput=renderLinkage;
+
+
+// ---- 4. 최종수요 항목별 유발 분해 ----
+const GROUPS=['소비','투자','수출'];
+function demandRows(v){
+ const it=demand.items,ti=it.findIndex(x=>x.code==='9190');
+ const sum=(k,g)=>it.reduce((a,x,i)=>x.group===g?a+v[k][i]:a,0);
+ const rows=[];
+ for(const g of GROUPS){
+  rows.push({label:g,bold:true,p:sum('production',g),m:sum('imports',g),v:sum('valueAdded',g)});
+  it.forEach((x,i)=>{if(x.group===g&&x.name!==g)rows.push({label:'　'+x.name,p:v.production[i],m:v.imports[i],v:v.valueAdded[i]});});
+ }
+ rows.push({label:'최종수요계',bold:true,p:v.production[ti],m:v.imports[ti],v:v.valueAdded[ti]});
+ return rows;
+}
+function fillDemandTable(tbody,rows){
+ const tot=rows[rows.length-1].p;
+ tbody.replaceChildren(...rows.map(r=>{
+  const tr=document.createElement('tr'),td=document.createElement('td');
+  if(r.bold)td.append(text('strong',r.label));else td.textContent=r.label;
+  tr.append(td);
+  [fmt(r.p),tot?(r.p/tot*100).toFixed(1):'-',fmt(r.m),fmt(r.v)].forEach(x=>tr.append(text('td',x)));
+  return tr;}));
+}
+function renderDemand(){
+ const L=LEVELS[currentLevel].label,y=currentYear;
+ if(!demand){
+  $('dem-rows').replaceChildren();$('dem-bars').replaceChildren();$('dem-sector-rows').replaceChildren();
+  $('dem-caption').textContent='이 파일에서는 최종수요 항목별 유발액 시트를 읽지 못했습니다.';return;
+ }
+ const rows=demandRows(demand.total),tot=rows[rows.length-1].p;
+ $('dem-caption').textContent=y+'년 '+L+' 전 산업 합계 — 백만원, 구성비는 생산유발액 기준(%)';
+ fillDemandTable($('dem-rows'),rows);
+ $('dem-bars').replaceChildren(...rows.filter(r=>r.bold&&GROUPS.includes(r.label)).map(r=>{
+  const share=tot?r.p/tot*100:0,d=text('div',r.label+' · '+share.toFixed(1)+'% ('+fmt(r.p)+'백만원)');
+  d.className='bar';const t=document.createElement('div');t.className='track';
+  const f=document.createElement('div');f.className='fill';f.style.width=Math.max(0,share)+'%';
+  t.append(f);d.append(t);return d;}));
+ renderDemandSector();
+}
+function renderDemandSector(){
+ const code=$('dem-sector').value,v=demand&&demand.sectors[code],s=sectors.find(x=>x.code===code);
+ if(!v||!s){$('dem-sector-rows').replaceChildren();$('dem-sector-caption').textContent='산업을 선택하세요.';return;}
+ $('dem-sector-caption').textContent=currentYear+'년 '+LEVELS[currentLevel].label+' · '+s.code+' '+s.name+' — 이 산업의 생산을 유발한 최종수요 (백만원)';
+ fillDemandTable($('dem-sector-rows'),demandRows(v));
+}
+$('dem-sector').onchange=renderDemandSector;
+$('dem-sector-search').oninput=()=>{const q=$('dem-sector-search').value.trim();options($('dem-sector'),sectors.filter(x=>(x.code+' '+x.name).includes(q)));renderDemandSector();};
+
+// ---- 5. 연도 간 비교 ----
+async function fetchBuffer(level,year){
+ const files=LEVELS[level].files(year);
+ for(const f of files){const r=await fetch('./data/'+f);if(r.ok)return r.arrayBuffer();}
+ throw Error('data/'+files[0]+' 파일을 찾을 수 없습니다.');
+}
+function runTemp(buffer,shocks,year){
+ return new Promise((resolve,reject)=>{
+  const w=new Worker('./worker.js'),pend=new Map();let id=0;
+  const ask=(type,payload)=>new Promise((res,rej)=>{const i=++id;pend.set(i,{res,rej});w.postMessage({id:i,type,payload});});
+  w.onmessage=({data:d})=>{if(d.type==='status')return;const p=pend.get(d.id);if(!p)return;pend.delete(d.id);d.ok?p.res(d.result):p.rej(Error(d.error));};
+  w.onerror=e=>{for(const p of pend.values())p.rej(Error(e.message||'Worker 실행 오류'));pend.clear();};
+  (async()=>{
+   try{
+    const info=await ask('init',buffer);
+    const miss=shocks.find(s=>!info.sectors.some(x=>x.code===s.code));
+    if(miss)throw Error(year+'년 표에 '+miss.code+' '+miss.name+' 부문이 없습니다.');
+    resolve(await ask('simulate',shocks));
+   }catch(e){reject(e);}finally{w.terminate();}
+  })();
+ });
+}
+function renderCompare(out,level){
+ const L=LEVELS[level].label,last=out[out.length-1],first=out[0];
+ $('cmp-sum-caption').textContent=L+' · 같은 증가액을 연도별 산업연관표로 계산한 결과 (백만원, 계수는 무단위)';
+ $('cmp-sum-rows').replaceChildren(...out.map(o=>{const r=o.r,tr=document.createElement('tr');
+  [o.year+'년',fmt(r.demand),fmt(r.production),fmt(r.imports),fmt(r.valueAdded),(r.production/r.demand).toFixed(4),(r.imports/r.demand).toFixed(4),(r.valueAdded/r.demand).toFixed(4)].forEach(v=>tr.append(text('td',v)));return tr;}));
+ const max=Math.max(...out.map(o=>o.r.production),1);
+ $('cmp-bars').replaceChildren(...out.map(o=>{
+  const d=text('div',o.year+'년 · 생산유발액 '+fmt(o.r.production)+'백만원 (생산유발계수 '+(o.r.production/o.r.demand).toFixed(4)+')');
+  d.className='bar';const t=document.createElement('div');t.className='track';
+  const f=document.createElement('div');f.className='fill';f.style.width=Math.max(0,o.r.production/max*100)+'%';
+  t.append(f);d.append(t);return d;}));
+ $('cmp-ind-caption').textContent=L+' · '+last.year+'년 기준 생산유발액 상위 15개 산업의 연도별 비교 (백만원)';
+ const hr=document.createElement('tr');
+ ['코드','산업',...out.map(o=>o.year+'년'),first.year+'→'+last.year+' 변화율'].forEach(h=>hr.append(text('th',h)));
+ $('cmp-ind-head').replaceChildren(hr);
+ const maps=out.map(o=>new Map(o.r.rows.map(x=>[x.code,x.production])));
+ $('cmp-ind-rows').replaceChildren(...last.r.rows.slice(0,15).map(row=>{
+  const tr=document.createElement('tr'),vals=maps.map(m=>m.get(row.code));
+  const a=vals[0],b=vals[vals.length-1];
+  [row.code,row.name,...vals.map(v=>v===undefined?'-':fmt(v)),a>0&&b!==undefined?((b-a)/a*100).toFixed(1)+'%':'-'].forEach(v=>tr.append(text('td',v)));
+  return tr;}));
+ $('compare-results').hidden=false;
+}
+$('compare-run').onclick=async()=>{
+ if(comparing)return;
+ if(!basket.length){$('compare-status').textContent='위의 시뮬레이션에서 시나리오를 먼저 추가하세요.';return;}
+ const level=currentLevel,shocks=basket.map(s=>({code:s.code,name:s.name,amount:s.amount})),years=YEARS.slice().reverse(),btn=$('compare-run'),out=[];
+ comparing=true;btn.disabled=true;$('compare-results').hidden=true;
+ try{
+  for(let i=0;i<years.length;i++){
+   $('compare-status').textContent=years[i]+'년 '+LEVELS[level].label+' 계산 중 ('+(i+1)+'/'+years.length+') — 연도마다 파일을 불러오므로 시간이 걸립니다.';
+   const r=await runTemp(await fetchBuffer(level,years[i]),shocks,years[i]);
+   out.push({year:years[i],r});
+  }
+  renderCompare(out,level);
+  $('compare-status').textContent='비교 완료 · '+LEVELS[level].label+' · 시나리오 '+shocks.length+'개 산업, 합계 '+fmt(out[0].r.demand)+'백만원';
+ }catch(e){$('compare-status').textContent='비교 실패: '+e.message;}
+ finally{comparing=false;btn.disabled=$('sheet').disabled;}
+};
 
 async function loadWorkbook(level,year){
  const files=LEVELS[level].files(year),label=year+'년 '+LEVELS[level].label;

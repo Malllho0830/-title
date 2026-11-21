@@ -9,6 +9,40 @@ def emit(x):
 def key(x):
     return str(x).strip()
 
+DEMAND_SHORT = {'9111': '민간소비', '9112': '정부소비', '9121': '민간고정자본형성', '9122': '정부고정자본형성',
+                '9131': '재고증감', '9132': '귀중품 순취득', '9140': '수출', '9190': '최종수요계'}
+DEMAND_GROUP = {'9111': '소비', '9112': '소비', '9121': '투자', '9122': '투자', '9131': '투자', '9132': '투자', '9140': '수출'}
+DEMAND_SHEETS = {'production': '최종수요 항목별 생산유발액', 'imports': '최종수요 항목별 수입유발액',
+                 'valueAdded': '최종수요 항목별 부가가치유발액'}
+
+def build_demand():
+    """최종수요 항목별 유발액 시트(생산·수입·부가가치)를 읽어 항목별 합계와 산업별 값을 만든다.
+    선택 기능이라 시트가 없거나 형식이 달라도 전체 초기화는 실패하지 않는다."""
+    try:
+        # 연도에 따라 시트 이름의 공백이 다르다(예: 2022년은 '최종수요항목별'), 공백을 무시하고 찾는다.
+        found = {}
+        for k, target in DEMAND_SHEETS.items():
+            hit = [s for s in book if s.replace(' ', '') == target.replace(' ', '')]
+            if not hit:
+                return None
+            found[k] = hit[0]
+        items = None; total = {}; per = {c: {} for c in codes}
+        for k, s in found.items():
+            rows = book[s]
+            cols = [(i, key(c)) for i, c in enumerate(rows[4]) if i >= 2 and c is not None]
+            if items is None:
+                items = [{'code': c, 'name': DEMAND_SHORT.get(c, key(rows[5][i] or c).replace('\n', ' ')),
+                          'group': DEMAND_GROUP.get(c, '합계')} for i, c in cols]
+            elif [c for _, c in cols] != [it['code'] for it in items]:
+                return None
+            rr = {key(r[0]): r for r in rows[6:] if r and r[0] is not None}
+            for c in codes:
+                per[c][k] = [float(rr[c][i] or 0) for i, _ in cols]
+            total[k] = [float(rr['9819'][i] or 0) for i, _ in cols]
+        return {'items': items, 'total': total, 'sectors': per}
+    except Exception:
+        return None
+
 def initialize(raw):
     global book, codes, names, L, M, V, sheets, valid
     wb = openpyxl.load_workbook(io.BytesIO(bytes(raw)), read_only=True, data_only=True)
@@ -69,7 +103,7 @@ def initialize(raw):
         else: kind = '연쇄 작음'
         linkage.append({'code': c, 'name': nme, 'backward': float(b), 'forward': float(f), 'type': kind})
     return emit({'sectors': [{'code': c, 'name': n_} for c, n_ in zip(codes, names)],
-                 'sheets': sheets, 'residuals': residuals, 'linkage': linkage})
+                 'sheets': sheets, 'residuals': residuals, 'linkage': linkage, 'demand': build_demand()})
 
 def explore(sheet, rowcode):
     rows = book[sheet]
