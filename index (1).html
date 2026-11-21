@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ko"><head><meta charset="utf-8"/><meta content="width=device-width,initial-scale=1" name="viewport"/><title>연도별 산업연관표분석</title><link href="./style.css" rel="stylesheet"/><script defer src="./app.js"></script></head>
+<body>
+<header class="top">
+ <div class="brand"><h1>연도별 산업연관표분석</h1><p id="hdr-sub">한국은행 연장표 · 생산자가격</p></div>
+ <div class="controls">
+  <label>연도<select id="year"></select></label>
+  <label>분류<select id="level"><option value="basic">기본부문 (380개)</option><option value="small">통합소분류 (165개)</option><option value="mid">통합중분류 (83개)</option><option value="large">통합대분류 (33개)</option></select></label>
+  <button id="load-btn" type="button">불러오기</button>
+ </div>
+</header>
+<div class="statusbar"><p id="status" role="status">연도와 분류를 고르고 불러오기를 누르세요.</p><details><summary>계수 검증</summary><pre id="validation">아직 자료를 불러오지 않았습니다.</pre></details></div>
+<nav aria-label="주요 메뉴" class="tabs"><button class="tab-btn on" data-tab="simulation" type="button">시뮬레이션</button><button class="tab-btn" data-tab="linkage" type="button">연쇄효과</button><button class="tab-btn" data-tab="explorer" type="button">원자료 탐색</button></nav>
+<main>
+<section class="tab on" id="simulation">
+ <div class="panel">
+  <h2>국내 생산물 최종수요 증가</h2>
+  <label>산업 검색<input disabled id="sector-search" placeholder="산업 이름 또는 코드"/></label>
+  <form id="scenario">
+   <select aria-label="산업 선택" disabled id="sector" required size="7"></select>
+   <div class="row"><label>증가액 (백만원)<input disabled id="amount" min="0.01" required step="any" type="number" value="1000"/></label><button disabled id="add">추가</button></div>
+  </form>
+  <ul id="basket"></ul>
+  <div class="row"><button class="primary" disabled id="run">파급효과 계산</button><button id="clear" type="button">비우기</button></div>
+  <p id="sim-status" role="status">시나리오를 추가하세요.</p>
+  <p class="note">1,000백만원 = 10억원. 수입 완제품 구매를 뺀 국내 생산물 수요의 양의 증가만 지원하며, 여러 산업의 증가액은 합산됩니다.</p>
+ </div>
+ <div class="panel">
+  <div hidden id="results">
+   <div class="cards" id="cards"></div>
+   <div class="bar-head"><h3>생산유발액 상위 15개 산업 (백만원)</h3><button id="download" type="button">CSV 다운로드</button></div>
+   <div id="bars"></div>
+   <details class="full"><summary>전체 결과표</summary><div class="scroll"><table><caption id="result-caption">산업별 유발액 — 백만원</caption><thead><tr><th>코드</th><th>산업</th><th>생산</th><th>수입</th><th>부가가치</th></tr></thead><tbody id="result-rows"></tbody></table></div></details>
+  </div>
+  <p class="empty">산업과 증가액을 추가하고 계산하면 결과가 여기에 표시됩니다.</p>
+ </div>
+</section>
+<section class="tab" id="linkage">
+ <div class="toolbar"><label>정렬 기준<select disabled id="link-sort"><option value="backward">영향력계수(후방) 내림차순</option><option value="forward">감응도계수(전방) 내림차순</option></select></label><label>산업 검색<input disabled id="link-search" placeholder="산업 이름 또는 코드"/></label><p id="link-summary">자료를 불러온 후 표시됩니다.</p></div>
+ <div class="scroll"><table><caption id="link-caption">산업 연쇄효과 — 무단위 지수, 전 산업 평균 = 1</caption><thead><tr><th>코드</th><th>산업</th><th>영향력계수</th><th>감응도계수</th><th>유형</th></tr></thead><tbody id="link-rows"></tbody></table></div>
+ <p class="note">영향력계수 = 산업의 생산유발계수 열합 ÷ 전 산업 열합 평균(후방연쇄). 감응도계수 = 행합 ÷ 전 산업 행합 평균(전방연쇄). 1보다 크면 평균 이상입니다.</p>
+</section>
+<section class="tab" id="explorer">
+ <div class="toolbar"><label>시트<select disabled id="sheet"></select></label><label>행 이름 검색<input disabled id="row-search" placeholder="예: 자동차, 부가가치"/></label><label>행 선택<select disabled id="row"></select></label><label>열 검색<input disabled id="col-search" placeholder="열 이름 또는 코드"/></label><p id="unit"></p></div>
+ <div class="scroll"><table><caption id="explore-caption">자료를 불러온 후 표시됩니다.</caption><thead><tr><th>열 코드</th><th>열 이름</th><th>원자료 값</th></tr></thead><tbody id="cells"></tbody></table></div>
+ <p class="note">금액표의 일반 데이터 단위는 백만원입니다. 구성비(%)·유발계수·영향력계수 등 요약 행은 행 명칭을 우선 확인하세요.</p>
+</section>
+</main>
+</body></html>
